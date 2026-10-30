@@ -1,0 +1,15 @@
+{
+  "name": "claude",
+  "version": "1.4.1",
+  "private": true,
+  "description": "Claude desktop line-art startup and lightweight animated chat background",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "python3 -m unittest discover -s tests -p 'test_*.py' -v",
+    "privacy": "python3 scripts/privacy_check.py",
+    "package": "python3 scripts/package.py"
+  }
+}

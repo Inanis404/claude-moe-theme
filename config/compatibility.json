@@ -1,0 +1,7 @@
+{
+  "projectVersion": "1.4.1",
+  "coreVersion": "4.29.0",
+  "originalMain": ".vite/build/index.pre.js",
+  "architecture": "amd64",
+  "officialDirectory": "/usr/lib/claude-desktop"
+}
