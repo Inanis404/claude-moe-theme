@@ -2,8 +2,7 @@
 function installClaudeChatBackground(poster, encodedVideo, suspended=false) {
   const SLOT='__claudeFixedBackground';
   if(window[SLOT]){window[SLOT].refresh();return true;}
-  let source=null,frame=null,timer=null,scanCount=0;
-  const panels=new Map();
+  let source=null,frame=null,timer=null,scanCount=0,active=null;
   const scopes=new Map();
   const anchors='[data-chat-transcript],[data-epitaxy-transcript-region],[data-testid="chat-transcript"],[data-chat-input-container],[data-chat-dock],[contenteditable="true"][role="textbox"],main [contenteditable="true"],main textarea,[role="main"] textarea';
   const boundary='main,[role="main"],.epitaxy-root,.dframe-content-inner,.dframe-content';
@@ -19,17 +18,16 @@ function installClaudeChatBackground(poster, encodedVideo, suspended=false) {
   function updateTheme(){
     const root=document.documentElement;
     const dark=root.classList.contains('dark')||root.getAttribute('data-mode')==='dark'||(root.getAttribute('data-mode')==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);
-    for(const panel of panels.values())panel.wash.style.background=dark?'rgba(28,25,23,.74)':'rgba(250,248,244,.70)';
+    if(active)active.wash.style.background=dark?'rgba(28,25,23,.74)':'rgba(250,248,244,.70)';
   }
   function geometry(){
     frame=null;
-    for(const active of panels.values()){
+    if(!active)return;
     const {host,layer,video}=active,r=host.getBoundingClientRect(),doc=host.ownerDocument;
     const left=Math.max(0,r.left),top=Math.max(0,r.top),right=Math.min(doc.documentElement.clientWidth,r.right),bottom=Math.min(doc.documentElement.clientHeight,r.bottom);
     const width=Math.max(0,right-left),height=Math.max(0,bottom-top),visible=width>0&&height>0&&!doc.hidden&&host.checkVisibility();
     if(visible!==active.visible){active.visible=visible;layer.style.display=visible?'block':'none';}
     if(visible&&!suspended){if(video.paused)video.play().catch(()=>{});}else if(!video.paused)video.pause();
-    }
   }
   function scheduleGeometry(){if(!frame)frame=requestAnimationFrame(geometry);}
   function clearMarks(){for(const node of marked)node.removeAttribute('data-claude-background');marked.clear();}
@@ -40,13 +38,20 @@ function installClaudeChatBackground(poster, encodedVideo, suspended=false) {
       node.setAttribute('data-claude-background','');marked.add(node);if(node===host)break;
     }
   }
-  function removeLayer(host){
-    const active=panels.get(host);if(!active)return;const {video,layer,resize}=active;
+  function removeLayer(){
+    if(!active)return;const {host,video,layer,resize}=active;
     video.pause();video.removeAttribute('src');video.load();resize.disconnect();layer.remove();
-    host.removeAttribute('data-claude-video-host');host.removeAttribute('data-claude-relative-host');panels.delete(host);
+    host.removeAttribute('data-claude-video-host');host.removeAttribute('data-claude-relative-host');active=null;
   }
   function addLayer(host){
-    if(panels.has(host))return;
+    if(active?.host===host)return;
+    if(active){
+      active.resize.unobserve(active.host);
+      active.host.removeAttribute('data-claude-video-host');active.host.removeAttribute('data-claude-relative-host');
+      host.setAttribute('data-claude-video-host','');
+      if(getComputedStyle(host).position==='static')host.setAttribute('data-claude-relative-host','');
+      host.append(active.layer);active.host=host;active.resize.observe(host);scheduleGeometry();return;
+    }
     const doc=host.ownerDocument,layer=doc.createElement('div'),video=doc.createElement('video'),wash=doc.createElement('div');
     layer.setAttribute('data-claude-video-layer','');layer.setAttribute('aria-hidden','true');layer.inert=true;
     host.setAttribute('data-claude-video-host','');
@@ -59,7 +64,7 @@ function installClaudeChatBackground(poster, encodedVideo, suspended=false) {
     for(const node of [video,wash])Object.assign(node.style,{position:'absolute',inset:'0',width:'100%',height:'100%',pointerEvents:'none'});
     video.style.objectFit='cover';layer.append(video,wash);host.append(layer);
     const resize=new ResizeObserver(scheduleGeometry);resize.observe(host);
-    panels.set(host,{host,layer,video,wash,resize});updateTheme();scheduleGeometry();
+    active={host,layer,video,wash,resize};updateTheme();scheduleGeometry();
   }
   function relevant(node){return node.nodeType===1&&!node.closest('[data-claude-video-layer]')&&(node.matches(anchors+',iframe')||node.querySelector(anchors+',iframe'));}
   function discover(node){
@@ -79,7 +84,7 @@ function installClaudeChatBackground(poster, encodedVideo, suspended=false) {
     style.textContent='[data-claude-background]{background-color:transparent!important;background-image:none!important}[data-claude-video-host]{isolation:isolate!important}[data-claude-relative-host]{position:relative!important}[data-claude-video-layer]{pointer-events:none!important}';
     (scope.nodeType===9?doc.head:scope).appendChild(style);
     const observer=new MutationObserver(records=>{
-      let dirty=[...panels.keys()].some(host=>!host.isConnected);
+      let dirty=active&&!active.host.isConnected;
       for(const record of records){
         if(record.target.nodeType===1&&record.target.closest('[data-claude-video-layer]'))continue;
         for(const node of record.addedNodes){if(relevant(node))dirty=true;if(node.nodeType===1&&!node.hasAttribute('data-claude-video-layer'))discover(node);}
@@ -98,21 +103,19 @@ function installClaudeChatBackground(poster, encodedVideo, suspended=false) {
     for(const scope of scopes.keys())for(const anchor of scope.querySelectorAll(anchors)){
       if(anchor.closest(excluded))continue;
       if(anchor.closest('.group\\/terminal,.xterm'))continue;
-      const host=anchor.closest('.epitaxy-chat-panel')||anchor.closest(boundary);if(!host||host.closest(excluded))continue;
-      const r=host.getBoundingClientRect();if((r.width<=0||r.height<=0)&&!panels.has(host))continue;
+      const host=anchor.closest('.dframe-pane-host')||anchor.closest('main,[role="main"]')||anchor.closest(boundary);if(!host||host.closest(excluded))continue;
+      const r=host.getBoundingClientRect();if((r.width<=0||r.height<=0)&&active?.host!==host)continue;
       candidates.push({anchor,host,area:r.width*r.height});
     }
-    const hosts=new Set(candidates.map(candidate=>candidate.host));
-    for(const host of hosts)if([...hosts].some(other=>other!==host&&host.contains(other)))hosts.delete(host);
-    for(const host of panels.keys())if(!hosts.has(host))removeLayer(host);
+    candidates.sort((first,second)=>second.area-first.area);
+    const host=candidates[0]?.host;
     clearMarks();
-    for(const host of hosts){
+    if(!host){if(active&&!active.host.isConnected)removeLayer();scheduleGeometry();return;}
     addLayer(host);mark(host,host);
     for(const {anchor} of candidates)if(host.contains(anchor)){
       const input=anchor.matches('[contenteditable],textarea,[data-chat-input-container],[data-chat-dock]');
       const start=input?(anchor.closest('[data-chat-input-container],[data-chat-dock],form')||anchor.parentElement)?.parentElement:anchor;
       mark(start,host);
-    }
     }
     scheduleGeometry();
   }
@@ -120,13 +123,12 @@ function installClaudeChatBackground(poster, encodedVideo, suspended=false) {
   addScope(document);
   new MutationObserver(updateTheme).observe(document.documentElement,{attributes:true,attributeFilter:['class','data-mode']});
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change',updateTheme);
-  window.addEventListener('unload',()=>{for(const host of panels.keys())removeLayer(host);if(source)URL.revokeObjectURL(source);},{once:true});
+  window.addEventListener('unload',()=>{removeLayer();if(source)URL.revokeObjectURL(source);},{once:true});
   window[SLOT]={refresh,setSuspended(value){suspended=Boolean(value);geometry();},stats(){
-    const details=[...panels.values()].map(active=>{
-    const v=active.video,r=active.host.getBoundingClientRect(),b=active.layer.getBoundingClientRect();return {
+    if(!active)return {players:0,scans:scanCount,suspended,host:null,layer:null,video:null};
+    const v=active.video,r=active.host.getBoundingClientRect(),b=active.layer.getBoundingClientRect();return {players:1,scans:scanCount,suspended,
       host:active?{tag:active.host.tagName,classes:active.host.className,x:r.x,y:r.y,width:r.width,height:r.height}:null,
       layer:active?{x:b.x,y:b.y,width:b.width,height:b.height,maxEdgeError:Math.max(...['left','top','right','bottom'].map(k=>Math.abs(r[k]-b[k])))}:null,
       video:v?{width:v.videoWidth,height:v.videoHeight,time:v.currentTime,paused:v.paused,error:v.error?.code||null,...v.getVideoPlaybackQuality()}:null};
-    });return {players:panels.size,scans:scanCount,suspended,...details[0],panels:details};
   }};refresh();return true;
 }
