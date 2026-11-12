@@ -2,7 +2,7 @@
 function installClaudeChatBackground(poster, encodedVideo, suspended=false) {
   const SLOT='__claudeFixedBackground';
   if(window[SLOT]){window[SLOT].refresh();return true;}
-  let source=null,frame=null,timer=null,active=null,scanCount=0;
+  let source=null,frame=null,timer=null,scanCount=0,active=null;
   const scopes=new Map();
   const anchors='[data-chat-transcript],[data-epitaxy-transcript-region],[data-testid="chat-transcript"],[data-chat-input-container],[data-chat-dock],[contenteditable="true"][role="textbox"],main [contenteditable="true"],main textarea,[role="main"] textarea';
   const boundary='main,[role="main"],.epitaxy-root,.dframe-content-inner,.dframe-content';
@@ -16,16 +16,16 @@ function installClaudeChatBackground(poster, encodedVideo, suspended=false) {
     source=URL.createObjectURL(new Blob([bytes],{type:'video/mp4'}));encodedVideo=null;return source;
   }
   function updateTheme(){
-    if(!active)return;
     const root=document.documentElement;
     const dark=root.classList.contains('dark')||root.getAttribute('data-mode')==='dark'||(root.getAttribute('data-mode')==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);
-    active.wash.style.background=dark?'rgba(28,25,23,.74)':'rgba(250,248,244,.70)';
+    if(active)active.wash.style.background=dark?'rgba(28,25,23,.74)':'rgba(250,248,244,.70)';
   }
   function geometry(){
-    frame=null;if(!active)return;
+    frame=null;
+    if(!active)return;
     const {host,layer,video}=active,r=host.getBoundingClientRect(),doc=host.ownerDocument;
     const left=Math.max(0,r.left),top=Math.max(0,r.top),right=Math.min(doc.documentElement.clientWidth,r.right),bottom=Math.min(doc.documentElement.clientHeight,r.bottom);
-    const width=Math.max(0,right-left),height=Math.max(0,bottom-top),visible=width>=240&&height>=160&&!doc.hidden;
+    const width=Math.max(0,right-left),height=Math.max(0,bottom-top),visible=width>0&&height>0&&!doc.hidden&&host.checkVisibility();
     if(visible!==active.visible){active.visible=visible;layer.style.display=visible?'block':'none';}
     if(visible&&!suspended){if(video.paused)video.play().catch(()=>{});}else if(!video.paused)video.pause();
   }
@@ -41,11 +41,17 @@ function installClaudeChatBackground(poster, encodedVideo, suspended=false) {
   function removeLayer(){
     if(!active)return;const {host,video,layer,resize}=active;
     video.pause();video.removeAttribute('src');video.load();resize.disconnect();layer.remove();
-    host.removeAttribute('data-claude-video-host');host.removeAttribute('data-claude-relative-host');active=null;clearMarks();
+    host.removeAttribute('data-claude-video-host');host.removeAttribute('data-claude-relative-host');active=null;
   }
   function addLayer(host){
     if(active?.host===host)return;
-    removeLayer();
+    if(active){
+      active.resize.unobserve(active.host);
+      active.host.removeAttribute('data-claude-video-host');active.host.removeAttribute('data-claude-relative-host');
+      host.setAttribute('data-claude-video-host','');
+      if(getComputedStyle(host).position==='static')host.setAttribute('data-claude-relative-host','');
+      host.append(active.layer);active.host=host;active.resize.observe(host);scheduleGeometry();return;
+    }
     const doc=host.ownerDocument,layer=doc.createElement('div'),video=doc.createElement('video'),wash=doc.createElement('div');
     layer.setAttribute('data-claude-video-layer','');layer.setAttribute('aria-hidden','true');layer.inert=true;
     host.setAttribute('data-claude-video-host','');
@@ -96,13 +102,16 @@ function installClaudeChatBackground(poster, encodedVideo, suspended=false) {
     const candidates=[];
     for(const scope of scopes.keys())for(const anchor of scope.querySelectorAll(anchors)){
       if(anchor.closest(excluded))continue;
-      const host=anchor.closest(boundary);if(!host||host.closest(excluded))continue;
-      const r=host.getBoundingClientRect();if(r.width<240||r.height<160)continue;
+      if(anchor.closest('.group\\/terminal,.xterm'))continue;
+      const host=anchor.closest('.dframe-pane-host')||anchor.closest('main,[role="main"]')||anchor.closest(boundary);if(!host||host.closest(excluded))continue;
+      const r=host.getBoundingClientRect();if((r.width<=0||r.height<=0)&&active?.host!==host)continue;
       candidates.push({anchor,host,area:r.width*r.height});
     }
-    candidates.sort((a,b)=>b.area-a.area);
-    if(!candidates.length){removeLayer();return;}
-    const host=candidates[0].host;addLayer(host);clearMarks();mark(host,host);
+    candidates.sort((first,second)=>second.area-first.area);
+    const host=candidates[0]?.host;
+    clearMarks();
+    if(!host){if(active&&!active.host.isConnected)removeLayer();scheduleGeometry();return;}
+    addLayer(host);mark(host,host);
     for(const {anchor} of candidates)if(host.contains(anchor)){
       const input=anchor.matches('[contenteditable],textarea,[data-chat-input-container],[data-chat-dock]');
       const start=input?(anchor.closest('[data-chat-input-container],[data-chat-dock],form')||anchor.parentElement)?.parentElement:anchor;
@@ -114,9 +123,10 @@ function installClaudeChatBackground(poster, encodedVideo, suspended=false) {
   addScope(document);
   new MutationObserver(updateTheme).observe(document.documentElement,{attributes:true,attributeFilter:['class','data-mode']});
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change',updateTheme);
-  window.addEventListener('unload',()=>{active?.video.pause();if(source)URL.revokeObjectURL(source);},{once:true});
+  window.addEventListener('unload',()=>{removeLayer();if(source)URL.revokeObjectURL(source);},{once:true});
   window[SLOT]={refresh,setSuspended(value){suspended=Boolean(value);geometry();},stats(){
-    const v=active?.video,r=active?.host.getBoundingClientRect(),b=active?.layer.getBoundingClientRect();return {players:active?1:0,scans:scanCount,suspended,
+    if(!active)return {players:0,scans:scanCount,suspended,host:null,layer:null,video:null};
+    const v=active.video,r=active.host.getBoundingClientRect(),b=active.layer.getBoundingClientRect();return {players:1,scans:scanCount,suspended,
       host:active?{tag:active.host.tagName,classes:active.host.className,x:r.x,y:r.y,width:r.width,height:r.height}:null,
       layer:active?{x:b.x,y:b.y,width:b.width,height:b.height,maxEdgeError:Math.max(...['left','top','right','bottom'].map(k=>Math.abs(r[k]-b[k])))}:null,
       video:v?{width:v.videoWidth,height:v.videoHeight,time:v.currentTime,paused:v.paused,error:v.error?.code||null,...v.getVideoPlaybackQuality()}:null};

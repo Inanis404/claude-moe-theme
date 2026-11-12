@@ -1,5 +1,19 @@
 # 测试
 
+## 多会话背景回归
+
+使用独立 Chromium 进程和合成页面，无需 Claude、账号或运行中的桌面窗口：
+
+```bash
+python -m pip install playwright
+python -m playwright install chromium
+python tests/multi_panel.py
+```
+
+覆盖单会话、双/三/四分屏、增减面板、尺寸变化、会话切换、工作区隐藏恢复、明暗遮罩、暂停恢复、流式文本稳定性、独立输入和滚动、循环及解码帧推进。所有分屏共享工作区中的唯一视频节点，并验证节点身份不变。脱敏截图及结果生成在 `.local/multi-panel/`。此测试不证明具体 Claude 版本或 Linux 原生 Electron 的 GUI 兼容性。
+
+可用 `python tests/background_benchmark.py --baseline /path/to/previous/chat-background.js` 对比两份脚本的四分屏开销。每轮在新 Chromium 进程中预热后采样 5 秒，共两轮，记录视频数、呈现帧数及浏览器/renderer/GPU 进程 CPU 时间。结果位于 `.local/multi-panel/benchmark.json`。GPU 进程 CPU 时间不是硬件 GPU 利用率，不能据此推断原生客户端的显卡负载。
+
 ## 源码与隐私
 
 Linux / WSL 下需要 Python 3、Node.js、FFmpeg：
