@@ -1,5 +1,17 @@
 # 测试
 
+## 多会话背景回归
+
+使用独立 Chromium 进程和合成页面，无需 Claude、账号或运行中的桌面窗口：
+
+```bash
+python -m pip install playwright
+python -m playwright install chromium
+python tests/multi_panel.py
+```
+
+覆盖单会话、双/三/四分屏、增减面板、尺寸变化、隐藏恢复、明暗遮罩、暂停恢复、流式文本稳定性、输入命中和视频解码帧推进。脱敏截图及结果生成在 `.local/multi-panel/`。各面板共享一个 Blob URL；每个可见面板保留自己的播放器，隐藏时暂停，移除时释放。此测试不证明具体 Claude 版本或 Linux 原生 Electron 的 GUI 兼容性。
+
 ## 源码与隐私
 
 Linux / WSL 下需要 Python 3、Node.js、FFmpeg：
